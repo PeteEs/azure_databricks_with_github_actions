@@ -1,0 +1,101 @@
+# Only Notebooks
+
+# Repository secrets:
+
+# - AZURE_CREDENTIALS (service principal login)
+# {
+#   "clientId": <>,
+#   "clientSecret": <>,
+#   "subscriptionId": <>,
+#   "tenantId": <>
+# }
+
+# - DATABRICKSHOST
+# https://<>.azuredatabricks.net/
+
+# - DATABRICKSTOKEN
+# <>
+
+name: 'CI_Azure_Databricks'
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+# -----------------------------------------------------------
+  BUILD:
+    runs-on: ubuntu-latest
+    steps:
+
+#    - uses: azure/login@v1
+#      with:
+#          creds: '${{ secrets.AZURE_CREDENTIALS }}'
+
+# Checkout code
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+# Publish Artifact: Databricks-Notebooks
+    - name: 'Publish Artifact: Databricks-Notebooks' 
+      uses: actions/upload-artifact@v3
+      with:
+        name: 'notebooks'
+        path: '${{ github.workspace }}/Notebooks'
+
+# -----------------------------------------------------------
+  DEV:
+    env:
+      folderName: release
+    needs: BUILD
+    runs-on: ubuntu-latest
+    
+    steps:
+
+# Install Databricks-cli
+    - run: pip install databricks-cli
+      name: "install databricks-cli"
+
+# Configure Databricks Access
+    - run: |
+        echo "${{ secrets.DATABRICKSHOST }}
+        ${{ secrets.DATABRICKSTOKEN }}" | databricks configure --token
+      name: "configure databricks-cli"
+    
+# Download Artifact: Databricks-Notebooks
+    - name: 'Download Artifact: Databricks-Notebooks' 
+      uses: actions/download-artifact@v3
+      with:
+        name: 'notebooks'
+        path: '${{ github.workspace }}/Notebooks'
+      
+    - run: 'ls ${{ github.workspace }}/Notebooks'
+    
+# Current branch name
+    - name: Get branch names
+      id: branch-name
+      uses: tj-actions/branch-names@v6
+        
+# Deleting Old Release      
+    - run: |
+        BRANCH_NAME=$(echo "${{ steps.branch-name.outputs.current_branch }}" | awk -F/ '{print $NF}')
+        FOLDER=$(echo /$folderName/$BRANCH_NAME)
+        echo $FOLDER
+        if databricks workspace ls --id $FOLDER > /dev/null ; then
+        echo "Deleting $FOLDER"
+        databricks workspace rm $FOLDER --recursive
+        else
+        echo "Folder $FOLDER not found. Skipping..."
+        fi
+      name: "Delete old release"
+      
+# Release to Workspace
+    - run: |
+       BRANCH_NAME=$(echo "${{ steps.branch-name.outputs.current_branch }}" | awk -F/ '{print $NF}')
+       FOLDER=$(echo /$folderName/$BRANCH_NAME)
+       echo $FOLDER
+       databricks workspace import_dir ${{ github.workspace }}/Notebooks $FOLDER --exclude-hidden-files
+      name: "Workspace Release"
